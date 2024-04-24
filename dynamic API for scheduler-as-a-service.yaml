@@ -1,0 +1,99 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: CloudFormation template for creating an API Gateway, Lambda function, and EventBridge rule
+
+Parameters:
+  LambdaFunctionName:
+    Type: String
+    Description: Name for the Lambda function
+  EventBridgeRuleName:
+    Type: String
+    Description: Name for the EventBridge rule
+  EventBridgeSchedule:
+    Type: String
+    Description: Schedule expression for the EventBridge rule (e.g., "cron(0/15 * * * ? *)")
+
+Resources:
+  LambdaFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Ref LambdaFunctionName
+      Handler: lambda_function.lambda_handler
+      Runtime: python3.8
+      Role: !GetAtt LambdaExecutionRole.Arn
+      Code:
+        ZipFile: |
+          import json
+          import boto3
+
+          def lambda_handler(event, context):
+              trigger_time = event['trigger_time']
+              eventbridge = boto3.client('events')
+
+              rule_name = event['rule_name']
+              schedule_expression = event['schedule_expression']
+
+              response = eventbridge.put_rule(
+                  Name=rule_name,
+                  ScheduleExpression=schedule_expression,
+                  State='ENABLED'
+              )
+
+              return {
+                  'statusCode': 200,
+                  'body': json.dumps(response)
+              }
+
+  LambdaExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+        - arn:aws:iam::aws:policy/AmazonEventBridgeFullAccess
+
+  ApiGateway:
+    Type: AWS::ApiGatewayV2::Api
+    Properties:
+      Name: SchedulerAPI
+      ProtocolType: HTTP
+      CorsConfiguration:
+        AllowOrigins: ['*']
+        AllowMethods: ['POST']
+
+  LambdaIntegration:
+    Type: AWS::ApiGatewayV2::Integration
+    Properties:
+      ApiId: !Ref ApiGateway
+      IntegrationType: AWS_PROXY
+      IntegrationUri: !Sub "arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${LambdaFunction.Arn}/invocations"
+
+  ApiGatewayRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref ApiGateway
+      RouteKey: ANY /{proxy+}
+      Target: !Ref LambdaIntegration
+
+  EventBridgeRule:
+    Type: AWS::Events::Rule
+    Properties:
+      Name: !Ref EventBridgeRuleName
+      ScheduleExpression: !Ref EventBridgeSchedule
+      State: ENABLED
+
+Outputs:
+  ApiEndpoint:
+    Description: URL of the API endpoint
+    Value: !Sub "https://${ApiGateway}.execute-api.${AWS::Region}.amazonaws.com/"
+  LambdaFunctionName:
+    Description: Name of the Lambda function
+    Value: !Ref LambdaFunctionName
+  EventBridgeRuleName:
+    Description: Name of the EventBridge rule
+    Value: !Ref EventBridgeRuleName
