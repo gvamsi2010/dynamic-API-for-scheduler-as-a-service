@@ -13,7 +13,7 @@ Parameters:
     Description: Schedule expression for the EventBridge rule (e.g., "cron(0/15 * * * ? *)")
 
 Resources:
-  LambdaFunction:
+  EventLambdaFunction:
     Type: AWS::Lambda::Function
     Properties:
       FunctionName: !Ref LambdaFunctionName
